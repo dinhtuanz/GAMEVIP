@@ -25,13 +25,12 @@ bool CharacterSelector::loadResources(SDL_Renderer* renderer, const std::vector<
         }
     }
 
-    // Khởi tạo nhân vật hiệp sĩ với các trang phục
-    std::vector<std::string> knightCostumes = {
+    std::vector<std::string> characters = {
         "assets/images/characters/Elf.png",
         "assets/images/characters/Wizart.png",
         "assets/images/characters/knight.png"
     };
-    character.loadCostumes(renderer, knightCostumes);
+    character.loadCostumes(renderer, characters);
     character.setPosition(characterRect.x, characterRect.y);
     character.setSize(characterRect.w, characterRect.h);
 

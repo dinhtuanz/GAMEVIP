@@ -13,6 +13,7 @@
 #include "character_selector.h"
 #include "background.h"
 #include "obstacle.h"
+
 struct Button {
     SDL_Rect rect;
     SDL_Color color;
@@ -49,7 +50,7 @@ public:
 
         // Set initial character position
         character.setPosition(SCREEN_WIDTH/2 - 25, SCREEN_HEIGHT - 100);
-        character.setSize(50, 50);
+        //character.setSize(50, 50);
         // Load sounds
 
         crashSound = Mix_LoadWAV(crashSoundPath.c_str());
@@ -78,7 +79,7 @@ public:
     }
 }
     void update(float deltaTime) {
-        if (isGameOver) return;
+        if (isGameOver||isVictory) return;
 
         character.update(deltaTime);
 
@@ -88,9 +89,13 @@ public:
 
         m_obstacleManager.update(deltaTime, this->score, this->scoreSound);
 
+        if (this->score >= 500) { // Điều kiện thắng là 500 điểm
+            this->isVictory = true;
+            return;
+        }
         SDL_Rect originalCharRect = character.getRect();
-        const int CHARACTER_HITBOX_WIDTH = 40; 
-        const int CHARACTER_HITBOX_HEIGHT = 40;
+        const int CHARACTER_HITBOX_WIDTH = 30; 
+        const int CHARACTER_HITBOX_HEIGHT = 30;
         SDL_Rect charCustomHitbox = CreateCenteredHitbox(originalCharRect, CHARACTER_HITBOX_WIDTH, CHARACTER_HITBOX_HEIGHT);
         for (const auto& obstacle : m_obstacleManager.getObstacles()) { // Lấy vật cản từ manager
             if (SDL_HasIntersection(&charCustomHitbox, &obstacle.rect)) {
@@ -334,14 +339,15 @@ int main(int argc, char* argv[]) {
         {{150, 520, 200, 50}, {255, 165, 0, 255}, "Guide"},
         {{150, 590, 200, 50}, {255, 0, 0, 255}, "Settings"}
     };
+
     Button settingsMusicToggleButton;
     Button settingsBackButton = {{(SCREEN_WIDTH - 250) / 2, 300, 250, 50}, {100, 100, 100, 255}, "Back to Menu"};
     char musicToggleButtonText[50];
 
-    const int PAUSE_BUTTON_WIDTH = 280;  // Chiều rộng của nút Pause
-    const int PAUSE_BUTTON_HEIGHT = 50;   // Chiều cao của nút Pause
+    const int PAUSE_BUTTON_WIDTH = 280;  
+    const int PAUSE_BUTTON_HEIGHT = 50;  
     const int PAUSE_BUTTON_X_POS = (SCREEN_WIDTH - PAUSE_BUTTON_WIDTH) / 2; // Căn giữa theo chiều ngang
-    const int PAUSE_BUTTON_SPACING = 20;  // Khoảng cách dọc giữa các nút
+    const int PAUSE_BUTTON_SPACING = 40;  // Khoảng cách dọc giữa các nút
     int pause_buttons_start_y = SCREEN_HEIGHT / 2 - 50;
 
     Button pauseMenuButtons[3];
@@ -374,6 +380,13 @@ int main(int argc, char* argv[]) {
             Mix_VolumeMusic(0);
             }
         }
+    std::vector<DialogueLine> victoryDialogueScript;
+    int currentVictoryDialogueLine = 0;
+
+    SDL_Texture* playerPortraitVictory = nullptr; 
+    SDL_Texture* npcPortraitVictory = LoadTexture("assets/images/hdieu.png", renderer)  ;
+    SDL_Texture* dialogueBoxBackground = nullptr;
+    SDL_Texture* victoryStateBackground=LoadTexture("assets/images/victory.png",renderer);
 
     while (isRunning) {
 
@@ -385,7 +398,6 @@ int main(int argc, char* argv[]) {
             if (event.type == SDL_QUIT) {
                 isRunning = false;
             }
-            
             switch (currentState) {
                 case GameState::MENU:
                     if (event.type == SDL_MOUSEBUTTONDOWN) {
@@ -434,16 +446,16 @@ int main(int argc, char* argv[]) {
                         int mouseX, mouseY;
                         SDL_GetMouseState(&mouseX, &mouseY);
                         SDL_Point clickPoint = {mouseX, mouseY};
-                        // Kiểm tra click vào nút "Tiep tuc"
+                        
                         if (SDL_PointInRect(&clickPoint, &pauseMenuButtons[0].rect)) {
                             currentState = GameState::PLAYING;
                         }
-                        // Kiểm tra click vào nút "Choi lai"
+                        
                         else if (SDL_PointInRect(&clickPoint, &pauseMenuButtons[1].rect)) {
                             game.reset(); // Reset lại trò chơi
                             currentState = GameState::PLAYING; // Chuyển sang trạng thái chơi
                         }
-                        // Kiểm tra click vào nút "Quay ve Menu"
+                        
                         else if (SDL_PointInRect(&clickPoint, &pauseMenuButtons[2].rect)) {
                             currentState = GameState::MENU;
                         }
@@ -472,15 +484,44 @@ int main(int argc, char* argv[]) {
                         }
                     }
                     break;
+                case GameState::VICTORY:
+                if (event.type == SDL_MOUSEBUTTONDOWN || 
+                    (event.type == SDL_KEYDOWN && event.key.repeat == 0)) {
+                    currentVictoryDialogueLine++;
+                    if (buttonSound) Mix_PlayChannel(-1, buttonSound, 0);
+
+                    if (static_cast<size_t>(currentVictoryDialogueLine) >= victoryDialogueScript.size()) {
+                        currentState = GameState::MENU;
+                        game.reset();
+                        if (isMusicOn && bgMusic) {
+                             if(Mix_PlayingMusic() == 0 || Mix_PausedMusic() == 1) Mix_PlayMusic(bgMusic, -1);
+                             Mix_VolumeMusic(musicVolumeWhenOn);
+                        } else if (!isMusicOn) {
+                             Mix_VolumeMusic(0);
+                        }
+                    }
+                }
+                break;
             }
         }
 
-        if (currentState == GameState::PLAYING && !game.gameOver()) {
+        if (currentState == GameState::PLAYING && !game.gameOver()&& !game.hasWon()) {
             game.update(deltaTime);
+        }
+        if (currentState == GameState::PLAYING && game.hasWon()) {
+            currentState = GameState::VICTORY;
+            currentVictoryDialogueLine = 0;
+            if (bgMusic && Mix_PlayingMusic()) { // Chỉ dừng nếu nhạc đang phát
+                Mix_HaltMusic();
+            }
+            victoryDialogueScript.clear();
+            victoryDialogueScript.push_back({"...", "YOU WIN"}); 
+           // victoryDialogueScript.push_back({" H Dieu", ""}); 
+            //victoryDialogueScript.push_back({"", ""});
         }
 
         SDL_RenderClear(renderer);
-        
+
         switch (currentState) {
             case GameState::MENU:
                 if (background) {
@@ -553,6 +594,7 @@ int main(int argc, char* argv[]) {
                         "- Each obstacle you pass gives you 1 point",
                         "- The game gets faster as you score more",
                         "- Press P or ESC to pause game",
+                        "- You win when you reach 1000 points",
                         "",
                         "Click to return to menu"
                     };
@@ -602,12 +644,91 @@ int main(int argc, char* argv[]) {
                     DrawButton(renderer, settingsBackButton, font); // Vẽ nút Back
                 }
                 break;
+            case GameState::VICTORY: { 
+            if (victoryStateBackground) { 
+                SDL_RenderCopy(renderer, victoryStateBackground, NULL, NULL);
+            } 
+            // Vẽ hộp thoại
+            SDL_Rect dialogueBoxRect = { SCREEN_WIDTH / 10, SCREEN_HEIGHT * 2 / 3 - 20, SCREEN_WIDTH * 8 / 10, SCREEN_HEIGHT / 3 };
+            SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+            SDL_SetRenderDrawColor(renderer, 10, 10, 30, 220);
+            SDL_RenderFillRect(renderer, &dialogueBoxRect);
+            SDL_SetRenderDrawColor(renderer, 180, 180, 220, 255);
+            SDL_RenderDrawRect(renderer, &dialogueBoxRect);
+            SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+
+             if (npcPortraitVictory && static_cast<size_t>(currentVictoryDialogueLine) < victoryDialogueScript.size()) {
+                 const DialogueLine& currentLine = victoryDialogueScript[currentVictoryDialogueLine];
+                 if (currentLine.speakerName == "PRINCESS") { 
+                      SDL_Rect portraitDestRect = {dialogueBoxRect.x + dialogueBoxRect.w - 150 - 10, dialogueBoxRect.y - 160, 150, 150};
+                      SDL_RenderCopy(renderer, npcPortraitVictory, NULL, &portraitDestRect);
+                 }
+             }
+
+
+            if (font && static_cast<size_t>(currentVictoryDialogueLine) < victoryDialogueScript.size()) {
+                const DialogueLine& currentLine = victoryDialogueScript[currentVictoryDialogueLine];
+                SDL_Color speakerNameColor = {255, 223, 0, 255}; 
+                SDL_Color dialogueTextColor = {255, 255, 255, 255};    
+
+                int textX = dialogueBoxRect.x + 20;
+                int currentTextY = dialogueBoxRect.y + 20;
+
+                if (!currentLine.speakerName.empty()) {
+                    std::string speakerText = currentLine.speakerName + ":";
+                    SDL_Surface* speakerSurf = TTF_RenderText_Solid(font, speakerText.c_str(), speakerNameColor);
+                    if (speakerSurf) {
+                        SDL_Texture* speakerTex = SDL_CreateTextureFromSurface(renderer, speakerSurf);
+                        SDL_Rect speakerRect = {textX, currentTextY, speakerSurf->w, speakerSurf->h};
+                        SDL_RenderCopy(renderer, speakerTex, NULL, &speakerRect);
+                        SDL_DestroyTexture(speakerTex);
+                        SDL_FreeSurface(speakerSurf);
+                        currentTextY += speakerRect.h + 8; 
+                    }
+                }
+
+                SDL_Surface* lineSurf = TTF_RenderText_Solid_Wrapped(font, currentLine.text.c_str(), dialogueTextColor, dialogueBoxRect.w - 40);
+                if (lineSurf) {
+                    SDL_Texture* lineTex = SDL_CreateTextureFromSurface(renderer, lineSurf);
+                    SDL_Rect lineRect = {textX, currentTextY, lineSurf->w, lineSurf->h};
+                    SDL_RenderCopy(renderer, lineTex, NULL, &lineRect);
+                    SDL_DestroyTexture(lineTex);
+                    SDL_FreeSurface(lineSurf);
+                }
+
+                std::string promptText = "Nhan de tiep tuc...";
+                SDL_Surface* promptSurf = TTF_RenderText_Solid(font, promptText.c_str(), {180, 180, 180, 255}); 
+                if(promptSurf){
+                    SDL_Texture* promptTex = SDL_CreateTextureFromSurface(renderer, promptSurf);
+                    SDL_Rect promptDst = {
+                        dialogueBoxRect.x + dialogueBoxRect.w - promptSurf->w - 15, 
+                        dialogueBoxRect.y + dialogueBoxRect.h - promptSurf->h - 10, 
+                        promptSurf->w, promptSurf->h
+                    };
+                    SDL_RenderCopy(renderer, promptTex, NULL, &promptDst);
+                    SDL_DestroyTexture(promptTex);
+                    SDL_FreeSurface(promptSurf);
+                }
+
+            } else if (font && static_cast<size_t>(currentVictoryDialogueLine) >= victoryDialogueScript.size()) {
+                SDL_Surface* surf = TTF_RenderText_Solid(font, "Nhan de ve Menu", {255,255,255,255});
+                if (surf) {
+                    SDL_Texture* tex = SDL_CreateTextureFromSurface(renderer, surf);
+                    SDL_Rect dst = {(SCREEN_WIDTH - surf->w) / 2, SCREEN_HEIGHT / 2, surf->w, surf->h};
+                    SDL_RenderCopy(renderer, tex, NULL, &dst);
+                    SDL_DestroyTexture(tex);
+                    SDL_FreeSurface(surf);
+                }
+            }
+            break;
+        }
         }
         
         SDL_RenderPresent(renderer);
         SDL_Delay(16);
     }
-
+    if (victoryStateBackground) SDL_DestroyTexture(victoryStateBackground);
+    if (npcPortraitVictory) SDL_DestroyTexture(npcPortraitVictory);
     if (background) SDL_DestroyTexture(background);
     if (gameBackground) SDL_DestroyTexture(gameBackground);
     if (font) TTF_CloseFont(font);
