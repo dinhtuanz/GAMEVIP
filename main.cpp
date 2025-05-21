@@ -8,101 +8,58 @@
 #include <random>
 #include <algorithm>
 #include <ctime>
-
-const int SCREEN_WIDTH = 500;
-const int SCREEN_HEIGHT = 700;
-
+#include "constants.h"
+#include "character.h"
+#include "character_selector.h"
+#include "background.h"
+#include "obstacle.h"
 struct Button {
     SDL_Rect rect;
     SDL_Color color;
     const char* text;
 };
-
-struct Obstacle {
-    SDL_Rect rect;
-    int speed;
-    bool passed;
-    int textureIndex; // Thêm trường để lưu chỉ số texture
-};
-
+SDL_Rect CreateCenteredHitbox(const SDL_Rect& originalRect, int hitboxWidth, int hitboxHeight) {
+    SDL_Rect hitbox;
+    hitbox.w = hitboxWidth;
+    hitbox.h = hitboxHeight;
+    hitbox.x = originalRect.x + (originalRect.w - hitbox.w) / 2;
+    hitbox.y = originalRect.y + (originalRect.h - hitbox.h) / 2;
+    return hitbox;
+}
 class Game {
 private:
-    SDL_Rect ballRect;
-    SDL_Texture* ballTexture;
-    std::vector<Obstacle> obstacles;
-    std::vector<SDL_Texture*> obstacleTextures; // Thêm vector lưu texture chướng ngại vật
-    
+    ObstacleManager m_obstacleManager;
+    Character character ;
     int score;
     bool isGameOver;
     Mix_Chunk* crashSound;
     Mix_Chunk* scoreSound;
     int baseSpeed;
-    std::mt19937 rng;
-    
-    // Giới hạn game
-    const int MAX_OBSTACLES = 8;
-    const int MAX_SPEED = 20;
-    const int OBSTACLE_SIZE = 30;
-    
+    Background scrollingGameBackground;
+
 public:
-    Game() : score(0), isGameOver(false), baseSpeed(2), rng(std::time(nullptr)) {}
+    Game() : score(0), isGameOver(false), baseSpeed(2) {}
     
-    void loadObstacleTextures(SDL_Renderer* renderer) {
-        for (int i = 1; i <= 7; i++) {
-            std::string path = "assets/images/obstacles/" + std::to_string(i) + ".png";
-            SDL_Surface* surface = IMG_Load(path.c_str());
-            if (surface) {
-                SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
-                SDL_FreeSurface(surface);
-                obstacleTextures.push_back(texture);
-            } else {
-                std::cerr << "Failed to load obstacle image: " << path << " - " << IMG_GetError() << std::endl;
-                obstacleTextures.push_back(nullptr);
-            }
-        }
-    }
-    
-    void init(SDL_Renderer* renderer, const std::string& ballPath, 
-              const std::string& crashSoundPath, const std::string& scoreSoundPath) {
-        // Load ball texture
+    void init(SDL_Renderer* renderer, const std::string& characterPath, 
+              const std::string& crashSoundPath, const std::string& scoreSoundPath,SDL_Texture* bgTex) {
+        // Load character texture
         isGameOver = false;
-        SDL_Surface* surface = IMG_Load(ballPath.c_str());
-        if (surface) {
-            ballTexture = SDL_CreateTextureFromSurface(renderer, surface);
-            SDL_FreeSurface(surface);
-        }
-        
-        // Set initial ball position
-        ballRect = {SCREEN_WIDTH/2 - 25, SCREEN_HEIGHT - 100, 50, 50};
-        
+        std::vector<std::string> costumePaths = {characterPath};
+        character.loadCostumes(renderer, costumePaths);
+
+        // Set initial character position
+        character.setPosition(SCREEN_WIDTH/2 - 25, SCREEN_HEIGHT - 100);
+        character.setSize(50, 50);
         // Load sounds
+
         crashSound = Mix_LoadWAV(crashSoundPath.c_str());
         scoreSound = Mix_LoadWAV(scoreSoundPath.c_str());
-        
-        // Load obstacle textures
-        loadObstacleTextures(renderer);
-        
-        // Generate initial obstacles
-        generateObstacles(3);
-    }
-    
-    void generateObstacles(int count) {
-        if (obstacles.size() >= MAX_OBSTACLES) return;
 
-        std::uniform_int_distribution<int> distX(0, SCREEN_WIDTH - OBSTACLE_SIZE);
-        std::uniform_int_distribution<int> distSpeed(1, baseSpeed);
-        std::uniform_int_distribution<int> distTexture(0, obstacleTextures.size() - 1);
-        
-        int obstaclesToCreate = std::min(count, MAX_OBSTACLES - (int)obstacles.size());
-        
-        for (int i = 0; i < obstaclesToCreate; i++) {
-            obstacles.push_back({
-                {distX(rng), -OBSTACLE_SIZE - (i * 150), OBSTACLE_SIZE, OBSTACLE_SIZE},
-                distSpeed(rng),
-                false,
-                distTexture(rng) // Gán texture ngẫu nhiên
-            });
-        }
+        m_obstacleManager.loadTextures(renderer);
+    
+        if (bgTex) {
+        scrollingGameBackground.setTexture(bgTex);
+    }
     }
     
     void handleEvent(SDL_Event* e) {
@@ -112,78 +69,53 @@ public:
             }
             return;
         }
-        
         if (e->type == SDL_MOUSEMOTION) {
-            ballRect.x = e->motion.x - ballRect.w/2;
-            
-            // Giới hạn không cho ra khỏi màn hình
-            if (ballRect.x < 0) ballRect.x = 0;
-            if (ballRect.x > SCREEN_WIDTH - ballRect.w) ballRect.x = SCREEN_WIDTH - ballRect.w;
-        }
+        int x = e->motion.x - character.getRect().w/2;
+        x = std::max(0, std::min(x, SCREEN_WIDTH - character.getRect().w));
+        int y= e->motion.y - character.getRect().h/2;
+        y = std::max(0, std::min(y, SCREEN_HEIGHT - character.getRect().h));
+        character.setPosition(x,y);
     }
-    
-    void update() {
+}
+    void update(float deltaTime) {
         if (isGameOver) return;
+
+        character.update(deltaTime);
+
+        scrollingGameBackground.update(deltaTime);
         
-        for (auto& obstacle : obstacles) {
-            obstacle.rect.y += obstacle.speed;
-            
-            if (SDL_HasIntersection(&ballRect, &obstacle.rect)) {
+        m_obstacleManager.setBaseSpeedFactor(this->baseSpeed);
+
+        m_obstacleManager.update(deltaTime, this->score, this->scoreSound);
+
+        SDL_Rect originalCharRect = character.getRect();
+        const int CHARACTER_HITBOX_WIDTH = 40; 
+        const int CHARACTER_HITBOX_HEIGHT = 40;
+        SDL_Rect charCustomHitbox = CreateCenteredHitbox(originalCharRect, CHARACTER_HITBOX_WIDTH, CHARACTER_HITBOX_HEIGHT);
+        for (const auto& obstacle : m_obstacleManager.getObstacles()) { // Lấy vật cản từ manager
+            if (SDL_HasIntersection(&charCustomHitbox, &obstacle.rect)) {
                 isGameOver = true;
                 if (crashSound) Mix_PlayChannel(-1, crashSound, 0);
                 return;
             }
-            
-            if (!obstacle.passed && obstacle.rect.y > SCREEN_HEIGHT) {
-                obstacle.passed = true;
-                score++;
-                if (scoreSound) Mix_PlayChannel(-1, scoreSound, 0);
-            }
         }
         
-        // Tạo chướng ngại vật mới khi cần
-        if (obstacles.size() < MAX_OBSTACLES / 2 || 
-            (obstacles.back().rect.y > -OBSTACLE_SIZE && obstacles.size() < MAX_OBSTACLES)) {
-            generateObstacles(1);
-        }
-        
-        // Xóa chướng ngại vật đã qua
-        obstacles.erase(
-            std::remove_if(obstacles.begin(), obstacles.end(),
-                [](const Obstacle& o) { return o.rect.y > SCREEN_HEIGHT && o.passed; }),
-            obstacles.end()
-        );
-        
-        // Tăng độ khó mỗi 10 điểm
         if (score % 10 == 0 && score > 0) {
             baseSpeed = std::min(2 + score/10, MAX_SPEED);
         }
     }
     
     void render(SDL_Renderer* renderer, TTF_Font* font) {
-        // Vẽ quả bóng
-        if (ballTexture) {
-            SDL_RenderCopy(renderer, ballTexture, NULL, &ballRect);
-        } else {
-            SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255);
-            SDL_RenderFillRect(renderer, &ballRect);
-        }
+
+        scrollingGameBackground.render(renderer);
+
+        // Draw character
+        character.render(renderer);
         
-        // Vẽ chướng ngại vật với texture
-        for (const auto& obstacle : obstacles) {
-            if (!obstacleTextures.empty() && obstacle.textureIndex < obstacleTextures.size() && 
-                obstacleTextures[obstacle.textureIndex]) {
-                SDL_RenderCopy(renderer, obstacleTextures[obstacle.textureIndex], NULL, &obstacle.rect);
-            } else {
-                // Fallback nếu không có texture
-                SDL_SetRenderDrawColor(renderer, 100, 100, 255, 255);
-                SDL_RenderFillRect(renderer, &obstacle.rect);
-                SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-                SDL_RenderDrawRect(renderer, &obstacle.rect);
-            }
-        }
+        // Draw obstacles
+        m_obstacleManager.render(renderer);
         
-        // Vẽ điểm
+        // Draw score
         if (font) {
             std::string scoreText = "Score: " + std::to_string(score);
             SDL_Color textColor = {255, 255, 255, 255};
@@ -199,7 +131,7 @@ public:
             }
         }
         
-        // Màn hình kết thúc
+        // Game over screen
         if (isGameOver) {
             SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
             SDL_SetRenderDrawColor(renderer, 0, 0, 0, 180);
@@ -209,7 +141,6 @@ public:
             if (font) {
                 SDL_Color textColor = {255, 255, 255, 255};
                 
-                // Game Over
                 std::string gameOverText = "Game Over!";
                 SDL_Surface* gameOverSurface = TTF_RenderText_Solid(font, gameOverText.c_str(), textColor);
                 if (gameOverSurface) {
@@ -227,7 +158,6 @@ public:
                     SDL_FreeSurface(gameOverSurface);
                 }
                 
-                // Điểm
                 std::string scoreText = "Score: " + std::to_string(score);
                 SDL_Surface* scoreSurface = TTF_RenderText_Solid(font, scoreText.c_str(), textColor);
                 if (scoreSurface) {
@@ -245,7 +175,6 @@ public:
                     SDL_FreeSurface(scoreSurface);
                 }
                 
-                // Hướng dẫn
                 std::string instructionText = "Click to play again";
                 SDL_Surface* instructionSurface = TTF_RenderText_Solid(font, instructionText.c_str(), textColor);
                 if (instructionSurface) {
@@ -267,11 +196,11 @@ public:
     }
     
     void reset() {
-        obstacles.clear();
         score = 0;
         isGameOver = false;
         baseSpeed = 2;
-        generateObstacles(3);
+        scrollingGameBackground.reset();
+        m_obstacleManager.reset();
     }
     
     bool gameOver() const {
@@ -279,119 +208,8 @@ public:
     }
     
     ~Game() {
-        if (ballTexture) SDL_DestroyTexture(ballTexture);
         if (crashSound) Mix_FreeChunk(crashSound);
         if (scoreSound) Mix_FreeChunk(scoreSound);
-        for (auto texture : obstacleTextures) {
-            if (texture) SDL_DestroyTexture(texture);
-        }
-    }
-};
-
-class BallSelector {
-private:
-    std::vector<SDL_Texture*> ballTextures;
-    std::vector<std::string> ballPaths;
-    int selectedIndex = 0;
-    SDL_Rect ballRect = { (SCREEN_WIDTH - 100)/2, 250, 100, 100 };
-    SDL_Rect leftArrowRect = { ballRect.x - 50, ballRect.y + (ballRect.h - 30)/2, 30, 30 };
-    SDL_Rect rightArrowRect = { ballRect.x + ballRect.w + 20, ballRect.y + (ballRect.h - 30)/2, 30, 30 };
-    Mix_Chunk* selectSound = nullptr;
-    
-public:
-    bool loadResources(SDL_Renderer* renderer, const std::vector<std::string>& paths, const std::string& soundPath) {
-        selectSound = Mix_LoadWAV(soundPath.c_str());
-        if (!selectSound) {
-            std::cerr << "Failed to load select sound: " << Mix_GetError() << std::endl;
-        }
-
-        for (const auto& path : paths) {
-            SDL_Surface* surface = IMG_Load(path.c_str());
-            if (!surface) {
-                std::cerr << "Failed to load image: " << path << " - " << IMG_GetError() << std::endl;
-                continue;
-            }
-            
-            SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
-            SDL_FreeSurface(surface);
-            
-            if (texture) {
-                ballTextures.push_back(texture);
-                ballPaths.push_back(path);
-            }
-        }
-        return !ballTextures.empty();
-    }
-    
-    void handleEvent(SDL_Event* e) {
-        if (e->type == SDL_MOUSEBUTTONDOWN) {
-            int x, y;
-            SDL_GetMouseState(&x, &y);
-            
-            if (x >= leftArrowRect.x && x <= leftArrowRect.x + leftArrowRect.w &&
-                y >= leftArrowRect.y && y <= leftArrowRect.y + leftArrowRect.h) {
-                selectedIndex = (selectedIndex - 1 + ballTextures.size()) % ballTextures.size();
-                if (selectSound) Mix_PlayChannel(-1, selectSound, 0);
-            }
-            else if (x >= rightArrowRect.x && x <= rightArrowRect.x + rightArrowRect.w &&
-                     y >= rightArrowRect.y && y <= rightArrowRect.y + rightArrowRect.h) {
-                selectedIndex = (selectedIndex + 1) % ballTextures.size();
-                if (selectSound) Mix_PlayChannel(-1, selectSound, 0);
-            }
-        }
-    }
-    
-    void render(SDL_Renderer* renderer, TTF_Font* font) {
-        if (!ballTextures.empty()) {
-            // Draw selected ball
-            SDL_RenderCopy(renderer, ballTextures[selectedIndex], NULL, &ballRect);
-            
-            // Draw arrows
-            SDL_SetRenderDrawColor(renderer, 100, 100, 100, 255);
-            SDL_RenderFillRect(renderer, &leftArrowRect);
-            SDL_RenderFillRect(renderer, &rightArrowRect);
-            
-            // Draw arrow shapes
-            SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-            // Left arrow
-            SDL_RenderDrawLine(renderer, leftArrowRect.x + 10, leftArrowRect.y + 15, 
-                             leftArrowRect.x + 20, leftArrowRect.y + 5);
-            SDL_RenderDrawLine(renderer, leftArrowRect.x + 10, leftArrowRect.y + 15, 
-                             leftArrowRect.x + 20, leftArrowRect.y + 25);
-            // Right arrow
-            SDL_RenderDrawLine(renderer, rightArrowRect.x + 10, rightArrowRect.y + 5, 
-                             rightArrowRect.x + 20, rightArrowRect.y + 15);
-            SDL_RenderDrawLine(renderer, rightArrowRect.x + 10, rightArrowRect.y + 25, 
-                             rightArrowRect.x + 20, rightArrowRect.y + 15);
-
-            // Draw "Select Character" text below the ball
-            if (font) {
-                SDL_Color textColor = {255, 255, 255, 255};
-                SDL_Surface* textSurface = TTF_RenderText_Solid(font, "Select Character", textColor);
-                if (textSurface) {
-                    SDL_Texture* textTexture = SDL_CreateTextureFromSurface(renderer, textSurface);
-                    if (textTexture) {
-                        int textX = (SCREEN_WIDTH - textSurface->w) / 2;
-                        int textY = ballRect.y + ballRect.h + 20;
-                        SDL_Rect textRect = {textX, textY, textSurface->w, textSurface->h};
-                        SDL_RenderCopy(renderer, textTexture, NULL, &textRect);
-                        SDL_DestroyTexture(textTexture);
-                    }
-                    SDL_FreeSurface(textSurface);
-                }
-            }
-        }
-    }
-    
-    std::string getSelectedBallPath() const {
-        return ballPaths.empty() ? "" : ballPaths[selectedIndex];
-    }
-    
-    ~BallSelector() {
-        for (auto texture : ballTextures) {
-            SDL_DestroyTexture(texture);
-        }
-        if (selectSound) Mix_FreeChunk(selectSound);
     }
 };
 
@@ -408,7 +226,6 @@ SDL_Texture* LoadTexture(const std::string& path, SDL_Renderer* renderer) {
     if (!texture) {
         std::cerr << "Failed to create texture: " << path << " - " << SDL_GetError() << std::endl;
     }
-    
     return texture;
 }
 
@@ -459,19 +276,18 @@ int main(int argc, char* argv[]) {
         std::cerr << "SDL_mixer initialization failed: " << Mix_GetError() << std::endl;
     }
 
-    // Load sounds
     Mix_Music* bgMusic = Mix_LoadMUS("assets/sounds/background.mp3");
     Mix_Chunk* buttonSound = Mix_LoadWAV("assets/sounds/button.mp3");
     Mix_Chunk* crashSound = Mix_LoadWAV("assets/sounds/crash.mp3");
     Mix_Chunk* scoreSound = Mix_LoadWAV("assets/sounds/score.mp3");
     
     if (bgMusic) {
-        Mix_PlayMusic(bgMusic, -1); // Loop indefinitely
-        Mix_VolumeMusic(MIX_MAX_VOLUME / 2); // Reduce volume
+        Mix_PlayMusic(bgMusic, -1);
+        Mix_VolumeMusic(MIX_MAX_VOLUME / 2);
     }
 
     SDL_Window* window = SDL_CreateWindow(
-        "Rapid Roll - Ball Selection",
+        "Game Vjpp",
         SDL_WINDOWPOS_CENTERED,
         SDL_WINDOWPOS_CENTERED,
         SCREEN_WIDTH,
@@ -499,7 +315,6 @@ int main(int argc, char* argv[]) {
         return -1;
     }
 
-    // Load fonts
     TTF_Font* font = TTF_OpenFont("assets/fonts/1.ttf", 24);
     TTF_Font* titleFont = TTF_OpenFont("assets/fonts/1.ttf", 100);
     TTF_Font* selectFont = TTF_OpenFont("assets/fonts/1.ttf", 28);
@@ -507,36 +322,36 @@ int main(int argc, char* argv[]) {
         std::cerr << "Failed to load fonts: " << TTF_GetError() << std::endl;
     }
 
-    // Load background
     SDL_Texture* background = LoadTexture("assets/images/background.jpg", renderer);
     SDL_Texture* gameBackground = LoadTexture("assets/images/game_background.jpg", renderer);
 
-    // Initialize ball selector
-    BallSelector ballSelector;
-    if (!ballSelector.loadResources(renderer, 
-        {"assets/images/balls/traidat.jpg", "assets/images/ballschot8.jpg", 
-         "assets/images/balls/nhu.jpg", "assets/images/balls/doivl.jpg", 
-         "assets/images/balls/nguoiyeuem.jpg"},
-        "assets/sounds/select.mp3")) {
-        std::cerr << "Failed to load ball resources!" << std::endl;
-    }
+    CharacterSelector characterSelector;
+   if (!characterSelector.loadResources(renderer, 
+    {"assets/images/characters/Elf.png",
+     "assets/images/characters/Wizart.png", 
+     "assets/images/characters/Knight.png"},
+    "assets/sounds/select.mp3")) {
+    std::cerr << "Failed to load character resources!" << std::endl;
+        }
 
-    // Create buttons
     Button buttons[3] = {
         {{150, 450, 200, 50}, {0, 255, 0, 255}, "Play"},
         {{150, 520, 200, 50}, {255, 165, 0, 255}, "Guide"},
         {{150, 590, 200, 50}, {255, 0, 0, 255}, "Settings"}
     };
 
-    // Game state
-    enum class GameState { MENU, PLAYING, GUIDE, SETTINGS };
     GameState currentState = GameState::MENU;
     Game game;
-
+    Uint32 lastFrameTime = SDL_GetTicks();
     bool isRunning = true;
     SDL_Event event;
     
     while (isRunning) {
+
+        Uint32 currentFrameTime = SDL_GetTicks();
+        float deltaTime = (currentFrameTime - lastFrameTime) / 1000.0f;
+        lastFrameTime = currentFrameTime;
+
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_QUIT) {
                 isRunning = false;
@@ -548,23 +363,21 @@ int main(int argc, char* argv[]) {
                         int mouseX, mouseY;
                         SDL_GetMouseState(&mouseX, &mouseY);
                         
-                        // Handle ball selection
-                        ballSelector.handleEvent(&event);
+                        characterSelector.handleEvent(&event);
                         
-                        // Handle buttons
                         for (int i = 0; i < 3; i++) {
                             if (mouseX >= buttons[i].rect.x && mouseX <= buttons[i].rect.x + buttons[i].rect.w &&
                                 mouseY >= buttons[i].rect.y && mouseY <= buttons[i].rect.y + buttons[i].rect.h) {
                                 if (buttonSound) Mix_PlayChannel(-1, buttonSound, 0);
                                 
-                                if (i == 0) { // Play button
-                                    game.init(renderer, ballSelector.getSelectedBallPath(),
-                                              "assets/sounds/select.mp3", "assets/sounds/select.mp3");
+                                if (i == 0) {
+                                    game.init(renderer, characterSelector.getSelectedCharacterPath(),
+                                              "assets/sounds/crash.mp3", "assets/sounds/score.mp3",gameBackground);
                                     game.reset();
                                     currentState = GameState::PLAYING;
-                                } else if (i == 1) { // Guide button
+                                } else if (i == 1) {
                                     currentState = GameState::GUIDE;
-                                } else if (i == 2) { // Settings button
+                                } else if (i == 2) {
                                     currentState = GameState::SETTINGS;
                                 }
                             }
@@ -591,25 +404,21 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        // Update game state
         if (currentState == GameState::PLAYING && !game.gameOver()) {
-            game.update();
+            game.update(deltaTime);
         }
 
-        // Rendering
         SDL_RenderClear(renderer);
         
         switch (currentState) {
             case GameState::MENU:
-                // Draw menu background
                 if (background) {
                     SDL_RenderCopy(renderer, background, NULL, NULL);
                 }
 
-                // Draw title
                 if (titleFont) {
                     SDL_Color titleColor = {255, 255, 255, 255};
-                    SDL_Surface* titleSurface = TTF_RenderText_Solid(titleFont, "RAPID ROLL", titleColor);
+                    SDL_Surface* titleSurface = TTF_RenderText_Solid(titleFont, "GAME VIPP", titleColor);
                     if (titleSurface) {
                         SDL_Texture* titleTexture = SDL_CreateTextureFromSurface(renderer, titleSurface);
                         if (titleTexture) {
@@ -622,39 +431,28 @@ int main(int argc, char* argv[]) {
                     }
                 }
                 
-                // Draw ball selector
-                ballSelector.render(renderer, selectFont);
+                characterSelector.render(renderer, selectFont);
                 
-                // Draw buttons
                 for (const auto& button : buttons) {
                     DrawButton(renderer, button, font);
                 }
                 break;
                 
             case GameState::PLAYING:
-                // Draw game background
-                if (gameBackground) {
-                    SDL_RenderCopy(renderer, gameBackground, NULL, NULL);
-                } else if (background) {
-                    SDL_RenderCopy(renderer, background, NULL, NULL);
-                }
-                
-                // Render game
+            
                 game.render(renderer, font);
                 break;
                 
             case GameState::GUIDE:
-                // Draw background
                 if (background) {
                     SDL_RenderCopy(renderer, background, NULL, NULL);
                 }
                 
-                // Draw guide text
                 if (font) {
                     SDL_Color textColor = {255, 255, 255, 255};
                     const char* lines[] = {
                         "HOW TO PLAY:",
-                        "- Move your mouse to control the ball",
+                        "- Move your mouse to control the character",
                         "- Avoid the obstacles coming from above",
                         "- Each obstacle you pass gives you 1 point",
                         "- The game gets faster as you score more",
@@ -681,12 +479,10 @@ int main(int argc, char* argv[]) {
                 break;
                 
             case GameState::SETTINGS:
-                // Draw background
                 if (background) {
                     SDL_RenderCopy(renderer, background, NULL, NULL);
                 }
                 
-                // Draw settings text
                 if (font) {
                     SDL_Color textColor = {255, 255, 255, 255};
                     const char* lines[] = {
@@ -717,10 +513,9 @@ int main(int argc, char* argv[]) {
         }
         
         SDL_RenderPresent(renderer);
-        SDL_Delay(16); // ~60 FPS
+        SDL_Delay(16);
     }
 
-    // Cleanup
     if (background) SDL_DestroyTexture(background);
     if (gameBackground) SDL_DestroyTexture(gameBackground);
     if (font) TTF_CloseFont(font);
