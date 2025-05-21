@@ -36,9 +36,9 @@ private:
     Mix_Chunk* scoreSound;
     int baseSpeed;
     Background scrollingGameBackground;
-
+    bool isVictory;
 public:
-    Game() : score(0), isGameOver(false), baseSpeed(2) {}
+    Game() : score(0), isGameOver(false), baseSpeed(2),isVictory(false) {}
     
     void init(SDL_Renderer* renderer, const std::string& characterPath, 
               const std::string& crashSoundPath, const std::string& scoreSoundPath,SDL_Texture* bgTex) {
@@ -123,7 +123,7 @@ public:
             if (textSurface) {
                 SDL_Texture* textTexture = SDL_CreateTextureFromSurface(renderer, textSurface);
                 if (textTexture) {
-                    SDL_Rect textRect = {10, 10, textSurface->w, textSurface->h};
+                    SDL_Rect textRect = {30, 30, textSurface->w, textSurface->h};
                     SDL_RenderCopy(renderer, textTexture, NULL, &textRect);
                     SDL_DestroyTexture(textTexture);
                 }
@@ -198,14 +198,14 @@ public:
     void reset() {
         score = 0;
         isGameOver = false;
+        isVictory = false;
         baseSpeed = 2;
         scrollingGameBackground.reset();
         m_obstacleManager.reset();
     }
     
-    bool gameOver() const {
-        return isGameOver;
-    }
+    bool gameOver() const { return isGameOver;}
+    bool hasWon() const { return isVictory; }
     
     ~Game() {
         if (crashSound) Mix_FreeChunk(crashSound);
@@ -230,11 +230,6 @@ SDL_Texture* LoadTexture(const std::string& path, SDL_Renderer* renderer) {
 }
 
 void DrawButton(SDL_Renderer* renderer, const Button& button, TTF_Font* font) {
-    SDL_SetRenderDrawColor(renderer, button.color.r, button.color.g, button.color.b, button.color.a);
-    SDL_RenderFillRect(renderer, &button.rect);
-    
-    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-    SDL_RenderDrawRect(renderer, &button.rect);
 
     if (font && button.text) {
         SDL_Color textColor = { 255, 255, 255, 255 };
@@ -242,7 +237,7 @@ void DrawButton(SDL_Renderer* renderer, const Button& button, TTF_Font* font) {
         if (textSurface) {
             SDL_Texture* textTexture = SDL_CreateTextureFromSurface(renderer, textSurface);
             if (textTexture) {
-                int textX = button.rect.x + (button.rect.w - textSurface->w) / 2;
+                int textX = button.rect.x + (button.rect.w - textSurface->w) / 2-25;
                 int textY = button.rect.y + (button.rect.h - textSurface->h) / 2;
                 SDL_Rect textRect = { textX, textY, textSurface->w, textSurface->h };
                 SDL_RenderCopy(renderer, textTexture, NULL, &textRect);
@@ -315,9 +310,9 @@ int main(int argc, char* argv[]) {
         return -1;
     }
 
-    TTF_Font* font = TTF_OpenFont("assets/fonts/1.ttf", 24);
+    TTF_Font* font = TTF_OpenFont("assets/fonts/1.ttf", 50);
     TTF_Font* titleFont = TTF_OpenFont("assets/fonts/1.ttf", 100);
-    TTF_Font* selectFont = TTF_OpenFont("assets/fonts/1.ttf", 28);
+    TTF_Font* selectFont = TTF_OpenFont("assets/fonts/1.ttf", 30);
     if (!font || !titleFont || !selectFont) {
         std::cerr << "Failed to load fonts: " << TTF_GetError() << std::endl;
     }
@@ -339,13 +334,47 @@ int main(int argc, char* argv[]) {
         {{150, 520, 200, 50}, {255, 165, 0, 255}, "Guide"},
         {{150, 590, 200, 50}, {255, 0, 0, 255}, "Settings"}
     };
+    Button settingsMusicToggleButton;
+    Button settingsBackButton = {{(SCREEN_WIDTH - 250) / 2, 300, 250, 50}, {100, 100, 100, 255}, "Back to Menu"};
+    char musicToggleButtonText[50];
+
+    const int PAUSE_BUTTON_WIDTH = 280;  // Chiều rộng của nút Pause
+    const int PAUSE_BUTTON_HEIGHT = 50;   // Chiều cao của nút Pause
+    const int PAUSE_BUTTON_X_POS = (SCREEN_WIDTH - PAUSE_BUTTON_WIDTH) / 2; // Căn giữa theo chiều ngang
+    const int PAUSE_BUTTON_SPACING = 20;  // Khoảng cách dọc giữa các nút
+    int pause_buttons_start_y = SCREEN_HEIGHT / 2 - 50;
+
+    Button pauseMenuButtons[3];
+    pauseMenuButtons[0].rect = {PAUSE_BUTTON_X_POS,pause_buttons_start_y,PAUSE_BUTTON_WIDTH,PAUSE_BUTTON_HEIGHT};
+    pauseMenuButtons[0].text = "    CONTINUE";
+    pauseMenuButtons[0].color = {50, 200, 50, 255};
+
+    pauseMenuButtons[1].rect = {PAUSE_BUTTON_X_POS,pause_buttons_start_y + PAUSE_BUTTON_HEIGHT + PAUSE_BUTTON_SPACING,PAUSE_BUTTON_WIDTH,PAUSE_BUTTON_HEIGHT};
+    pauseMenuButtons[1].text = "RESUME";
+    pauseMenuButtons[1].color = {200, 200, 50, 255};
+    
+    pauseMenuButtons[2].rect = {PAUSE_BUTTON_X_POS,pause_buttons_start_y + (PAUSE_BUTTON_HEIGHT + PAUSE_BUTTON_SPACING) * 2,PAUSE_BUTTON_WIDTH,PAUSE_BUTTON_HEIGHT};
+    pauseMenuButtons[2].text = "BACK TO Menu";
+    pauseMenuButtons[2].color = {200, 50, 50, 255};
 
     GameState currentState = GameState::MENU;
     Game game;
     Uint32 lastFrameTime = SDL_GetTicks();
     bool isRunning = true;
     SDL_Event event;
-    
+    bool isMusicOn = true;
+    int musicVolumeWhenOn = MIX_MAX_VOLUME / 2;
+
+        if (bgMusic) {
+            Mix_PlayMusic(bgMusic, -1);
+            if (isMusicOn) {
+                Mix_VolumeMusic(musicVolumeWhenOn);
+            }
+            else {
+            Mix_VolumeMusic(0);
+            }
+        }
+
     while (isRunning) {
 
         Uint32 currentFrameTime = SDL_GetTicks();
@@ -386,6 +415,12 @@ int main(int argc, char* argv[]) {
                     break;
                     
                 case GameState::PLAYING:
+                    if (event.type == SDL_KEYDOWN) {
+                    // Nhấn 'P' hoặc 'Escape' để Pause game
+                        if (event.key.keysym.sym == SDLK_p || event.key.keysym.sym == SDLK_ESCAPE) {
+                            currentState = GameState::PAUSED;
+                        }
+                    }
                     if (game.gameOver()) {
                         if (event.type == SDL_MOUSEBUTTONDOWN) {
                             currentState = GameState::MENU;
@@ -394,11 +429,47 @@ int main(int argc, char* argv[]) {
                         game.handleEvent(&event);
                     }
                     break;
-                    
+                case GameState::PAUSED:
+                    if (event.type == SDL_MOUSEBUTTONDOWN) {
+                        int mouseX, mouseY;
+                        SDL_GetMouseState(&mouseX, &mouseY);
+                        SDL_Point clickPoint = {mouseX, mouseY};
+                        // Kiểm tra click vào nút "Tiep tuc"
+                        if (SDL_PointInRect(&clickPoint, &pauseMenuButtons[0].rect)) {
+                            currentState = GameState::PLAYING;
+                        }
+                        // Kiểm tra click vào nút "Choi lai"
+                        else if (SDL_PointInRect(&clickPoint, &pauseMenuButtons[1].rect)) {
+                            game.reset(); // Reset lại trò chơi
+                            currentState = GameState::PLAYING; // Chuyển sang trạng thái chơi
+                        }
+                        // Kiểm tra click vào nút "Quay ve Menu"
+                        else if (SDL_PointInRect(&clickPoint, &pauseMenuButtons[2].rect)) {
+                            currentState = GameState::MENU;
+                        }
+                    }
+                break;
+
                 case GameState::GUIDE:
                 case GameState::SETTINGS:
                     if (event.type == SDL_MOUSEBUTTONDOWN) {
-                        currentState = GameState::MENU;
+                        int mouseX, mouseY;
+                        SDL_GetMouseState(&mouseX, &mouseY);
+                        SDL_Point clickPoint = {mouseX, mouseY};
+                        if (SDL_PointInRect(&clickPoint, &settingsMusicToggleButton.rect)) {
+                            isMusicOn = !isMusicOn; // Đảo trạng thái
+                            if (isMusicOn) {
+                                Mix_VolumeMusic(musicVolumeWhenOn);
+                            }
+                            else {
+                                Mix_VolumeMusic(0);
+                            }
+                            if (buttonSound) Mix_PlayChannel(-1, buttonSound, 0);
+                        }
+                        else if (SDL_PointInRect(&clickPoint, &settingsBackButton.rect)) {
+                            currentState = GameState::MENU;
+                            if (buttonSound) Mix_PlayChannel(-1, buttonSound, 0);
+                        }
                     }
                     break;
             }
@@ -442,13 +513,38 @@ int main(int argc, char* argv[]) {
             
                 game.render(renderer, font);
                 break;
-                
+            case GameState::PAUSED: {
+                game.render(renderer, font); 
+                //Lớp Phủ
+                SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND); // Bật chế độ trộn màu
+                SDL_SetRenderDrawColor(renderer, 0, 0, 0, 180); // Màu đen, alpha 180 (độ mờ ~70%)
+                SDL_Rect overlayRect = {0, 0, SCREEN_WIDTH, SCREEN_HEIGHT};
+                SDL_RenderFillRect(renderer, &overlayRect);
+                SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE); // Tắt chế độ trộn màu  
+                if (titleFont) {
+                    SDL_Surface* surf = TTF_RenderText_Solid(titleFont, "PAUSING", {255, 255, 255, 255});
+                    if (surf) {
+                    SDL_Texture* tex = SDL_CreateTextureFromSurface(renderer, surf);
+
+                    int title_y = pauseMenuButtons[0].rect.y - surf->h - 40; // cách nút đầu tiên 40px
+        
+                    SDL_Rect titleRect = {(SCREEN_WIDTH - surf->w) / 2, title_y, surf->w, surf->h};
+                    SDL_RenderCopy(renderer, tex, NULL, &titleRect);
+                    SDL_DestroyTexture(tex);
+                    SDL_FreeSurface(surf);
+                    }
+                }
+                for (int i = 0; i < 3; ++i) {
+                    DrawButton(renderer, pauseMenuButtons[i], font);
+                }
+                break;
+            }
             case GameState::GUIDE:
                 if (background) {
                     SDL_RenderCopy(renderer, background, NULL, NULL);
                 }
                 
-                if (font) {
+                if (selectFont) {
                     SDL_Color textColor = {255, 255, 255, 255};
                     const char* lines[] = {
                         "HOW TO PLAY:",
@@ -456,13 +552,14 @@ int main(int argc, char* argv[]) {
                         "- Avoid the obstacles coming from above",
                         "- Each obstacle you pass gives you 1 point",
                         "- The game gets faster as you score more",
+                        "- Press P or ESC to pause game",
                         "",
                         "Click to return to menu"
                     };
                     
                     int y = 100;
                     for (const char* line : lines) {
-                        SDL_Surface* textSurface = TTF_RenderText_Solid(font, line, textColor);
+                        SDL_Surface* textSurface = TTF_RenderText_Solid(selectFont, line, textColor);
                         if (textSurface) {
                             SDL_Texture* textTexture = SDL_CreateTextureFromSurface(renderer, textSurface);
                             if (textTexture) {
@@ -483,31 +580,26 @@ int main(int argc, char* argv[]) {
                     SDL_RenderCopy(renderer, background, NULL, NULL);
                 }
                 
-                if (font) {
+                if (selectFont) {
                     SDL_Color textColor = {255, 255, 255, 255};
-                    const char* lines[] = {
-                        "SETTINGS",
-                        "Music Volume: [TODO]",
-                        "Sound Effects: [TODO]",
-                        "",
-                        "Click to return to menu"
-                    };
                     
                     int y = 100;
-                    for (const char* line : lines) {
-                        SDL_Surface* textSurface = TTF_RenderText_Solid(font, line, textColor);
-                        if (textSurface) {
-                            SDL_Texture* textTexture = SDL_CreateTextureFromSurface(renderer, textSurface);
-                            if (textTexture) {
-                                int x = (SCREEN_WIDTH - textSurface->w) / 2;
-                                SDL_Rect textRect = {x, y, textSurface->w, textSurface->h};
-                                SDL_RenderCopy(renderer, textTexture, NULL, &textRect);
-                                SDL_DestroyTexture(textTexture);
-                                y += textSurface->h + 10;
-                            }
-                            SDL_FreeSurface(textSurface);
-                        }
+                    SDL_Surface* surf = TTF_RenderText_Solid(titleFont, "SETTINGS", textColor);
+                    if (surf) {
+                        SDL_Texture* tex = SDL_CreateTextureFromSurface(renderer, surf);
+                        SDL_Rect dst = {(SCREEN_WIDTH - surf->w) / 2, y, surf->w, surf->h};
+                        SDL_RenderCopy(renderer, tex, NULL, &dst);
+                        y += surf->h + 40; // Tăng khoảng cách Y
+                        SDL_FreeSurface(surf);
+                        SDL_DestroyTexture(tex);
                     }
+                    sprintf(musicToggleButtonText, "Music: [ %s ]", (isMusicOn ? "ON" : "OFF"));
+                    settingsMusicToggleButton.text = musicToggleButtonText;
+                    settingsMusicToggleButton.rect = {(SCREEN_WIDTH - 250) / 2, y, 250, 50};
+                    DrawButton(renderer, settingsMusicToggleButton, font);
+                    settingsBackButton.rect.x = (SCREEN_WIDTH - settingsBackButton.rect.w) / 2; // Căn giữa X
+                    settingsBackButton.rect.y = y+100; // Đặt ở vị trí Y mới
+                    DrawButton(renderer, settingsBackButton, font); // Vẽ nút Back
                 }
                 break;
         }

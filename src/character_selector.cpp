@@ -98,7 +98,11 @@ void CharacterSelector::render(SDL_Renderer* renderer, TTF_Font* font) {
         }
     }
 }
-
+const std::string CHARACTER_NAMES[] = {
+    "Elf",    // Tương ứng với selectedIndex = 0
+    "Wizart", // Tương ứng với selectedIndex = 1
+    "Knight"  // Tương ứng với selectedIndex = 2
+};
 void CharacterSelector::renderCharacterPreview(SDL_Renderer* renderer, TTF_Font* font) {
     // Cập nhật animation
     static Uint32 lastTime = 0;
@@ -125,7 +129,7 @@ void CharacterSelector::renderCharacterPreview(SDL_Renderer* renderer, TTF_Font*
     
     // Vẽ tên trang phục
     SDL_Color textColor = {255, 255, 0, 255}; // Màu vàng
-    std::string costumeName = std::to_string(character.getCurrentCostume() + 1);
+    std::string costumeName =CHARACTER_NAMES[character.getCurrentCostume()];
     SDL_Surface* textSurface = TTF_RenderText_Solid(font, costumeName.c_str(), textColor);
     
     if (textSurface) {

@@ -17,7 +17,9 @@ enum class GameState {
     MENU, 
     PLAYING, 
     GUIDE, 
-    SETTINGS 
+    SETTINGS ,
+    PAUSED,
+    VICTORY
 };
 
 #endif // CONSTANTS_H
