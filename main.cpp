@@ -464,26 +464,31 @@ int main(int argc, char* argv[]) {
 
                 case GameState::GUIDE:
                 case GameState::SETTINGS:
-                    if (event.type == SDL_MOUSEBUTTONDOWN) {
-                        int mouseX, mouseY;
-                        SDL_GetMouseState(&mouseX, &mouseY);
-                        SDL_Point clickPoint = {mouseX, mouseY};
+                if (event.type == SDL_MOUSEBUTTONDOWN) {
+
+                    int mouseX, mouseY;
+                    SDL_GetMouseState(&mouseX, &mouseY);
+                    SDL_Point clickPoint = {mouseX, mouseY};
+
+                    if (currentState == GameState::SETTINGS) {
+
                         if (SDL_PointInRect(&clickPoint, &settingsMusicToggleButton.rect)) {
-                            isMusicOn = !isMusicOn; // Đảo trạng thái
-                            if (isMusicOn) {
-                                Mix_VolumeMusic(musicVolumeWhenOn);
-                            }
-                            else {
-                                Mix_VolumeMusic(0);
-                            }
+                            isMusicOn = !isMusicOn;
+                            if (isMusicOn) { Mix_VolumeMusic(musicVolumeWhenOn); }
+                            else { Mix_VolumeMusic(0); }
+                            if (buttonSound) Mix_PlayChannel(-1, buttonSound, 0);
+                        } else if (SDL_PointInRect(&clickPoint, &settingsBackButton.rect)) {
+                            currentState = GameState::MENU; // Nút Back trong Settings đưa về MENU
                             if (buttonSound) Mix_PlayChannel(-1, buttonSound, 0);
                         }
-                        else if (SDL_PointInRect(&clickPoint, &settingsBackButton.rect)) {
-                            currentState = GameState::MENU;
-                            if (buttonSound) Mix_PlayChannel(-1, buttonSound, 0);
-                        }
+
+                    } else {
+                        currentState = GameState::MENU;
+                        if (buttonSound) Mix_PlayChannel(-1, buttonSound, 0);
                     }
-                    break;
+                }
+                break;
+
                 case GameState::VICTORY:
                 if (event.type == SDL_MOUSEBUTTONDOWN || 
                     (event.type == SDL_KEYDOWN && event.key.repeat == 0)) {
